@@ -1,15 +1,16 @@
-import websocket
-import json
-import telegram
-import threading
+import requests
 import time
+import telegram
+import json
+import websocket
+from threading import Thread
 
 # === CONFIGURAÇÕES ===
-TELEGRAM_TOKEN = '7714700345:AAGdioVJEBbTVv8RjBNAjUtgBczjxc89sC0'  # <-- Coloque seu token do Bot aqui
-CHAT_ID = '1002988216'       # <-- Coloque seu Chat ID aqui
-URL_WS = 'wss://squid-app-67gkfodnqidtlacean.app/ws'
+TELEGRAM_TOKEN = '7714700345:AAGdioVJEBbTVv8RjBNAjUtgBczjxc89sC0'  # Coloque seu token aqui
+CHAT_ID = '1002988216'       # Coloque seu chat_id aqui
+WEBSOCKET_URL = 'wss://squid-app-g67gkf.ondigitalocean.app/ws'
 
-# Inicializa o bot do Telegram
+# === INICIALIZA O BOT ===
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
 # Histórico dos últimos números
@@ -26,18 +27,15 @@ def get_duzia(numero):
     else:
         return None
 
-# Função para analisar e enviar alerta
+# Função para analisar e enviar o alerta
 def analisar_e_alertar():
-    if len(historico) < 2:
-        return
-
+    global historico
     alertar = False
 
-    # Verifica se dois últimos números foram da mesma dúzia
-    if get_duzia(historico[-1]) == get_duzia(historico[-2]):
-        alertar = True
+    if len(historico) >= 2:
+        if get_duzia(historico[-1]) == get_duzia(historico[-2]):
+            alertar = True
 
-    # Calcula a dúzia mais frequente
     contagem_duzias = [0, 0, 0]
     for numero in historico:
         duzia = get_duzia(numero)
@@ -46,72 +44,75 @@ def analisar_e_alertar():
 
     duzia_mais_frequente = contagem_duzias.index(max(contagem_duzias)) + 1
 
-    # Monta a mensagem
     ultimos_numeros = ' ➔ '.join(map(str, historico[-5:]))
-    mensagem = f"""
-⚠️ ENTRADA CONFIRMADA ⚠️
 
-🌀 Roleta: EVOLUTION LIVE
-🏑 Sinal: {duzia_mais_frequente}ª Dúzia com tendência!
+    mensagem = f"""
+🚨 ENTRADA CONFIRMADA 🚨
+
+🎰 Roleta: EVOLUTION LIVE
+🏁 Sinal: {duzia_mais_frequente}ª Dúzia com tendência!
 
 📋 Últimos resultados:
 {ultimos_numeros}
 
-{'⚡ Dois números seguidos na mesma dúzia! Aproveite!' if alertar else ''}
+⚡ Alerta: Dois últimos números na mesma dúzia!
+🔔 Sugestão: Cobrir as outras duas dúzias.
 
-💬 Clique aqui para abrir a roleta (link em breve!)
+💬 Clique aqui para abrir a roleta (em breve seu link!)
 🏆 Gestão de banca sempre!
 """
-
     bot.send_message(chat_id=CHAT_ID, text=mensagem)
 
-# Função chamada toda vez que chegar mensagem do WebSocket
+# Função para tratar mensagens recebidas do WebSocket
 def on_message(ws, message):
     try:
         data = json.loads(message)
 
         if data.get('type') == 'LiveGame' and data.get('event') == 'liveGameFullData':
-            resultados = data['data'].get('result', [])
-            if resultados:
-                for numero in resultados:
+            result_data = data['data']['result']
+            if 'ips' in result_data:
+                numeros = [int(n) for n in result_data['ips']]
+                print(f"Números capturados: {numeros}")
+
+                for numero in numeros:
                     historico.append(numero)
                     if len(historico) > 50:
                         historico.pop(0)
-                print(f"Números capturados: {resultados}")
+
                 analisar_e_alertar()
+
     except Exception as e:
         print(f"Erro ao processar mensagem: {e}")
 
-# Função chamada se der erro no WebSocket
-def on_error(ws, error):
-    print(f"Erro no WebSocket: {error}")
-
-# Função chamada se o WebSocket fechar
-def on_close(ws, close_status_code, close_msg):
-    print("Conexão WebSocket fechada. Tentando reconectar...")
-    time.sleep(5)
-    iniciar_websocket()
-
-# Função chamada quando o WebSocket abrir
+# Função ao abrir a conexão
 def on_open(ws):
     print("Conectado no WebSocket!")
+    msg = {
+        "type": "common",
+        "event": "changePage",
+        "data": {
+            "from": "null",
+            "to": "evolution-roleta-ao-vivo"
+        }
+    }
+    ws.send(json.dumps(msg))
+    print("Mensagem de entrada enviada para a roleta Evolution!")
 
-# Função para iniciar a conexão WebSocket
+# Função principal de WebSocket
 def iniciar_websocket():
     ws = websocket.WebSocketApp(
-        URL_WS,
-        on_message=on_message,
-        on_error=on_error,
-        on_close=on_close,
-        on_open=on_open
+        WEBSOCKET_URL,
+        on_open=on_open,
+        on_message=on_message
     )
-    wst = threading.Thread(target=ws.run_forever)
-    wst.daemon = True
-    wst.start()
+    ws.run_forever()
 
-# === MAIN ===
+# === INICIAR ===
+def main():
+    print("Bot iniciado...")
+    websocket.enableTrace(False)
+    t = Thread(target=iniciar_websocket)
+    t.start()
+
 if __name__ == "__main__":
-    print("Iniciando bot...")
-    iniciar_websocket()
-    while True:
-        time.sleep(1)  # Mantém o bot rodando
+    main()
