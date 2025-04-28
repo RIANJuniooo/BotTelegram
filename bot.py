@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 
 # === CONFIGURAÇÕES ===
 TELEGRAM_TOKEN = '7714700345:AAGdioVJEBbTVv8RjBNAjUtgBczjxc89sC0'  # Coloque seu token aqui
-CHAT_ID = '1002988216'       # Vamos configurar isso já já!
+CHAT_ID = '1002988216'       # Coloque seu chat_id aqui
 URL_SITE = 'https://gamblingcounting.com/pt-BR/evolution-roleta-ao-vivo'
 INTERVALO = 15  # Tempo entre checagens em segundos
 
@@ -21,7 +21,6 @@ def buscar_resultados():
         response = requests.get(URL_SITE)
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Achei que os números estão nesses elementos
         resultados_html = soup.select('.number')
         resultados = [int(r.text.strip()) for r in resultados_html if r.text.strip().isdigit()]
         
@@ -30,7 +29,18 @@ def buscar_resultados():
         print(f"Erro ao buscar resultados: {e}")
         return []
 
-# Função para detectar alertas
+# Função para saber a dúzia de um número
+def get_duzia(numero):
+    if 1 <= numero <= 12:
+        return 1
+    elif 13 <= numero <= 24:
+        return 2
+    elif 25 <= numero <= 36:
+        return 3
+    else:
+        return None  # 0 ou inválido
+
+# Função para analisar e enviar o alerta
 def analisar_e_alertar(novos_numeros):
     global historico
     alertar = False
@@ -55,24 +65,28 @@ def analisar_e_alertar(novos_numeros):
 
     duzia_mais_frequente = contagem_duzias.index(max(contagem_duzias)) + 1
 
-    # Monta a mensagem
-    mensagem = f"🎯 Dúzia mais provável agora: {duzia_mais_frequente}ª Dúzia\n"
+    # Últimos 5 números para mostrar
+    ultimos_numeros = ' ➔ '.join(map(str, historico[-5:]))
 
-    if alertar:
-        mensagem += "⚡ Dois números seguidos na mesma dúzia! Considere apostar nas outras duas."
+    # Monta a mensagem estilo VIP
+    mensagem = f"""
+🚨 ENTRADA CONFIRMADA 🚨
+
+🎰 Roleta: EVOLUTION LIVE
+🏁 Sinal: {duzia_mais_frequente}ª Dúzia com tendência!
+
+📋 Últimos resultados:
+{ultimos_numeros}
+
+⚡ Alerta: Dois últimos números na mesma dúzia!
+🔔 Sugestão: Cobrir as outras duas dúzias.
+
+💬 Clique aqui para abrir a roleta (em breve seu link!)
+
+🏆 Gestão de banca sempre!
+"""
 
     bot.send_message(chat_id=CHAT_ID, text=mensagem)
-
-# Função para saber a dúzia de um número
-def get_duzia(numero):
-    if 1 <= numero <= 12:
-        return 1
-    elif 13 <= numero <= 24:
-        return 2
-    elif 25 <= numero <= 36:
-        return 3
-    else:
-        return None  # 0 ou inválido
 
 # === LOOP PRINCIPAL ===
 def main():
