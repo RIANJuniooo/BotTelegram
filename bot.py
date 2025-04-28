@@ -23,7 +23,10 @@ def buscar_resultados():
         
         resultados_html = soup.select('.number')
         resultados = [int(r.text.strip()) for r in resultados_html if r.text.strip().isdigit()]
-        
+
+        # 🔵 NOVO: Mostra no log os números capturados
+        print(f"Números capturados: {resultados}")
+
         return resultados
     except Exception as e:
         print(f"Erro ao buscar resultados: {e}")
