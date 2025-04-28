@@ -1,36 +1,19 @@
-import requests
-import time
+import websocket
+import json
 import telegram
-from bs4 import BeautifulSoup
+import threading
+import time
 
 # === CONFIGURAÇÕES ===
-TELEGRAM_TOKEN = '7714700345:AAGdioVJEBbTVv8RjBNAjUtgBczjxc89sC0'  # Coloque seu token aqui
-CHAT_ID = '1002988216'       # Coloque seu chat_id aqui
-URL_SITE = 'https://gamblingcounting.com/pt-BR/evolution-roleta-ao-vivo'
-INTERVALO = 15  # Tempo entre checagens em segundos
+TELEGRAM_TOKEN = '7714700345:AAGdioVJEBbTVv8RjBNAjUtgBczjxc89sC0'  # <-- Coloque seu token do Bot aqui
+CHAT_ID = '1002988216'       # <-- Coloque seu Chat ID aqui
+URL_WS = 'wss://squid-app-67gkfodnqidtlacean.app/ws'
 
-# === INICIALIZA O BOT ===
+# Inicializa o bot do Telegram
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 
 # Histórico dos últimos números
 historico = []
-
-# Função para buscar resultados da roleta
-def buscar_resultados():
-    try:
-        response = requests.get(URL_SITE)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        resultados_html = soup.select('.number')
-        resultados = [int(r.text.strip()) for r in resultados_html if r.text.strip().isdigit()]
-
-        # 🔵 NOVO: Mostra no log os números capturados
-        print(f"Números capturados: {resultados}")
-
-        return resultados
-    except Exception as e:
-        print(f"Erro ao buscar resultados: {e}")
-        return []
 
 # Função para saber a dúzia de um número
 def get_duzia(numero):
@@ -41,23 +24,18 @@ def get_duzia(numero):
     elif 25 <= numero <= 36:
         return 3
     else:
-        return None  # 0 ou inválido
+        return None
 
-# Função para analisar e enviar o alerta
-def analisar_e_alertar(novos_numeros):
-    global historico
+# Função para analisar e enviar alerta
+def analisar_e_alertar():
+    if len(historico) < 2:
+        return
+
     alertar = False
 
-    # Atualiza histórico com novos números
-    for numero in novos_numeros:
-        historico.append(numero)
-        if len(historico) > 50:
-            historico.pop(0)
-
-    # Verifica se os dois últimos números foram da mesma dúzia
-    if len(historico) >= 2:
-        if get_duzia(historico[-1]) == get_duzia(historico[-2]):
-            alertar = True
+    # Verifica se dois últimos números foram da mesma dúzia
+    if get_duzia(historico[-1]) == get_duzia(historico[-2]):
+        alertar = True
 
     # Calcula a dúzia mais frequente
     contagem_duzias = [0, 0, 0]
@@ -68,37 +46,72 @@ def analisar_e_alertar(novos_numeros):
 
     duzia_mais_frequente = contagem_duzias.index(max(contagem_duzias)) + 1
 
-    # Últimos 5 números para mostrar
+    # Monta a mensagem
     ultimos_numeros = ' ➔ '.join(map(str, historico[-5:]))
-
-    # Monta a mensagem estilo VIP
     mensagem = f"""
-🚨 ENTRADA CONFIRMADA 🚨
+⚠️ ENTRADA CONFIRMADA ⚠️
 
-🎰 Roleta: EVOLUTION LIVE
-🏁 Sinal: {duzia_mais_frequente}ª Dúzia com tendência!
+🌀 Roleta: EVOLUTION LIVE
+🏑 Sinal: {duzia_mais_frequente}ª Dúzia com tendência!
 
 📋 Últimos resultados:
 {ultimos_numeros}
 
-⚡ Alerta: Dois últimos números na mesma dúzia!
-🔔 Sugestão: Cobrir as outras duas dúzias.
+{'⚡ Dois números seguidos na mesma dúzia! Aproveite!' if alertar else ''}
 
-💬 Clique aqui para abrir a roleta (em breve seu link!)
-
+💬 Clique aqui para abrir a roleta (link em breve!)
 🏆 Gestão de banca sempre!
 """
 
     bot.send_message(chat_id=CHAT_ID, text=mensagem)
 
-# === LOOP PRINCIPAL ===
-def main():
-    print("Bot iniciado...")
-    while True:
-        novos_numeros = buscar_resultados()
-        if novos_numeros:
-            analisar_e_alertar(novos_numeros)
-        time.sleep(INTERVALO)
+# Função chamada toda vez que chegar mensagem do WebSocket
+def on_message(ws, message):
+    try:
+        data = json.loads(message)
 
+        if data.get('type') == 'LiveGame' and data.get('event') == 'liveGameFullData':
+            resultados = data['data'].get('result', [])
+            if resultados:
+                for numero in resultados:
+                    historico.append(numero)
+                    if len(historico) > 50:
+                        historico.pop(0)
+                print(f"Números capturados: {resultados}")
+                analisar_e_alertar()
+    except Exception as e:
+        print(f"Erro ao processar mensagem: {e}")
+
+# Função chamada se der erro no WebSocket
+def on_error(ws, error):
+    print(f"Erro no WebSocket: {error}")
+
+# Função chamada se o WebSocket fechar
+def on_close(ws, close_status_code, close_msg):
+    print("Conexão WebSocket fechada. Tentando reconectar...")
+    time.sleep(5)
+    iniciar_websocket()
+
+# Função chamada quando o WebSocket abrir
+def on_open(ws):
+    print("Conectado no WebSocket!")
+
+# Função para iniciar a conexão WebSocket
+def iniciar_websocket():
+    ws = websocket.WebSocketApp(
+        URL_WS,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close,
+        on_open=on_open
+    )
+    wst = threading.Thread(target=ws.run_forever)
+    wst.daemon = True
+    wst.start()
+
+# === MAIN ===
 if __name__ == "__main__":
-    main()
+    print("Iniciando bot...")
+    iniciar_websocket()
+    while True:
+        time.sleep(1)  # Mantém o bot rodando
