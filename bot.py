@@ -1,18 +1,17 @@
-import websocket
+import asyncio
+import websockets
 import json
 import telegram
-import time
 
 # === CONFIGURAÇÕES ===
-TELEGRAM_TOKEN = '7714700345:AAGdioVJEBbTVv8RjBNAjUtgBczjxc89sC0'  # Coloque seu token aqui
-CHAT_ID = '1002988216'      # Coloque seu chat_id aqui
-URL_WS = 'wss://squid-app-67gkf.ondigitalocean.app/ws'  # URL WebSocket detectada
+TELEGRAM_TOKEN = '7714700345:AAGdioVJEBbTVv8RjBNAjUtgBczjxc89sC0'  # Seu token aqui
+CHAT_ID = '1002988216'  # Seu chat_id aqui
+WS_URL = 'wss://squid-app-67gkf.ondigitalocean.app/ws'  # URL do WebSocket
 
-# === INICIALIZA O BOT ===
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
 historico = []
 
-# Função para saber a dúzia de um número
+# === Funções de Análise ===
 def get_duzia(numero):
     if 1 <= numero <= 12:
         return 1
@@ -23,10 +22,13 @@ def get_duzia(numero):
     else:
         return None
 
-# Função para enviar mensagem formatada
-def enviar_alerta():
-    if not historico:
-        return
+def analisar_e_alertar():
+    global historico
+    alertar = False
+
+    if len(historico) >= 2:
+        if get_duzia(historico[-1]) == get_duzia(historico[-2]):
+            alertar = True
 
     contagem_duzias = [0, 0, 0]
     for numero in historico:
@@ -41,69 +43,58 @@ def enviar_alerta():
 🚨 ENTRADA CONFIRMADA 🚨
 
 🎰 Roleta: EVOLUTION LIVE
-🏁 Sinal: {duzia_mais_frequente}ª Dúzia com tendência!
+🏑 Sinal: {duzia_mais_frequente}ª Dúzia com tendência!
 
 📋 Últimos resultados:
 {ultimos_numeros}
 
-⚡ Alerta: Dois últimos números na mesma dúzia!
+🔦 Alerta: Dois últimos números na mesma dúzia!
 🔔 Sugestão: Cobrir as outras duas dúzias.
 
 💬 Clique aqui para abrir a roleta (em breve seu link!)
+
 🏆 Gestão de banca sempre!
 """
 
-    bot.send_message(chat_id=CHAT_ID, text=mensagem)
+    if alertar:
+        bot.send_message(chat_id=CHAT_ID, text=mensagem)
 
-# Função principal de WebSocket
-def on_message(ws, message):
-    global historico
-    try:
-        data = json.loads(message)
-        if 'event' in data and data['event'] == 'liveGameFullData':
-            payload = data.get('data', {})
-            if payload.get('type') == 'roulette':
-                resultados = payload.get('result', [])
-                for item in resultados:
-                    numero = item.get('n')
-                    if isinstance(numero, int) and numero > 0:
-                        historico.append(numero)
-                        if len(historico) > 50:
-                            historico.pop(0)
-                        print(f"Número capturado: {numero}")
+# === Conexão WebSocket ===
+async def escutar_websocket():
+    async with websockets.connect(WS_URL) as websocket:
+        print("Conectado ao WebSocket!")
+        while True:
+            mensagem = await websocket.recv()
+            try:
+                dados = json.loads(mensagem)
+                if isinstance(dados, list):
+                    for item in dados:
+                        if item.get('type') == 'LiveGame' and item.get('event') == 'liveGameFullData':
+                            data = item.get('data', {})
+                            game_type = data.get('t')
+                            if game_type == 'roulette':
+                                resultados = data.get('r', [])
+                                numeros = [x.get('n') for x in resultados if 'n' in x]
 
-                        if len(historico) >= 2:
-                            if get_duzia(historico[-1]) == get_duzia(historico[-2]):
-                                enviar_alerta()
-    except Exception as e:
-        print(f"Erro ao processar mensagem: {e}")
+                                print(f"Números capturados: {numeros}")
 
+                                for numero in numeros:
+                                    historico.append(numero)
+                                    if len(historico) > 50:
+                                        historico.pop(0)
+                                analisar_e_alertar()
+            except Exception as e:
+                print(f"Erro ao processar mensagem: {e}")
 
-def on_error(ws, error):
-    print(f"Erro no WebSocket: {error}")
-
-
-def on_close(ws, close_status_code, close_msg):
-    print("WebSocket fechado")
-
-
-def on_open(ws):
-    print("Conectado ao WebSocket!")
-
-
-# === LOOP PRINCIPAL ===
-if __name__ == "__main__":
+# === Executa o bot ===
+async def main():
+    print("Bot iniciado...")
     while True:
         try:
-            websocket.enableTrace(False)
-            ws = websocket.WebSocketApp(
-                URL_WS,
-                on_message=on_message,
-                on_error=on_error,
-                on_close=on_close
-            )
-            ws.on_open = on_open
-            ws.run_forever()
+            await escutar_websocket()
         except Exception as e:
-            print(f"Erro geral: {e}")
-            time.sleep(5)  # Espera antes de tentar reconectar
+            print(f"Erro na conexão WebSocket: {e}")
+            await asyncio.sleep(5)  # Espera antes de tentar reconectar
+
+if __name__ == "__main__":
+    asyncio.run(main())
