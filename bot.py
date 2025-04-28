@@ -1,19 +1,15 @@
-import requests
-import time
-import telegram
-import json
 import websocket
-from threading import Thread
+import json
+import telegram
+import time
 
 # === CONFIGURAÇÕES ===
 TELEGRAM_TOKEN = '7714700345:AAGdioVJEBbTVv8RjBNAjUtgBczjxc89sC0'  # Coloque seu token aqui
-CHAT_ID = '1002988216'       # Coloque seu chat_id aqui
-WEBSOCKET_URL = 'wss://squid-app-g67gkf.ondigitalocean.app/ws'
+CHAT_ID = '1002988216'      # Coloque seu chat_id aqui
+URL_WS = 'wss://squid-app-67gkf.ondigitalocean.app/ws'  # URL WebSocket detectada
 
 # === INICIALIZA O BOT ===
 bot = telegram.Bot(token=TELEGRAM_TOKEN)
-
-# Histórico dos últimos números
 historico = []
 
 # Função para saber a dúzia de um número
@@ -27,14 +23,10 @@ def get_duzia(numero):
     else:
         return None
 
-# Função para analisar e enviar o alerta
-def analisar_e_alertar():
-    global historico
-    alertar = False
-
-    if len(historico) >= 2:
-        if get_duzia(historico[-1]) == get_duzia(historico[-2]):
-            alertar = True
+# Função para enviar mensagem formatada
+def enviar_alerta():
+    if not historico:
+        return
 
     contagem_duzias = [0, 0, 0]
     for numero in historico:
@@ -43,7 +35,6 @@ def analisar_e_alertar():
             contagem_duzias[duzia - 1] += 1
 
     duzia_mais_frequente = contagem_duzias.index(max(contagem_duzias)) + 1
-
     ultimos_numeros = ' ➔ '.join(map(str, historico[-5:]))
 
     mensagem = f"""
@@ -61,58 +52,58 @@ def analisar_e_alertar():
 💬 Clique aqui para abrir a roleta (em breve seu link!)
 🏆 Gestão de banca sempre!
 """
+
     bot.send_message(chat_id=CHAT_ID, text=mensagem)
 
-# Função para tratar mensagens recebidas do WebSocket
+# Função principal de WebSocket
 def on_message(ws, message):
+    global historico
     try:
         data = json.loads(message)
+        if 'event' in data and data['event'] == 'liveGameFullData':
+            payload = data.get('data', {})
+            if payload.get('type') == 'roulette':
+                resultados = payload.get('result', [])
+                for item in resultados:
+                    numero = item.get('n')
+                    if isinstance(numero, int) and numero > 0:
+                        historico.append(numero)
+                        if len(historico) > 50:
+                            historico.pop(0)
+                        print(f"Número capturado: {numero}")
 
-        if data.get('type') == 'LiveGame' and data.get('event') == 'liveGameFullData':
-            result_data = data['data']['result']
-            if 'ips' in result_data:
-                numeros = [int(n) for n in result_data['ips']]
-                print(f"Números capturados: {numeros}")
-
-                for numero in numeros:
-                    historico.append(numero)
-                    if len(historico) > 50:
-                        historico.pop(0)
-
-                analisar_e_alertar()
-
+                        if len(historico) >= 2:
+                            if get_duzia(historico[-1]) == get_duzia(historico[-2]):
+                                enviar_alerta()
     except Exception as e:
         print(f"Erro ao processar mensagem: {e}")
 
-# Função ao abrir a conexão
+
+def on_error(ws, error):
+    print(f"Erro no WebSocket: {error}")
+
+
+def on_close(ws, close_status_code, close_msg):
+    print("WebSocket fechado")
+
+
 def on_open(ws):
-    print("Conectado no WebSocket!")
-    msg = {
-        "type": "common",
-        "event": "changePage",
-        "data": {
-            "from": "null",
-            "to": "evolution-roleta-ao-vivo"
-        }
-    }
-    ws.send(json.dumps(msg))
-    print("Mensagem de entrada enviada para a roleta Evolution!")
+    print("Conectado ao WebSocket!")
 
-# Função principal de WebSocket
-def iniciar_websocket():
-    ws = websocket.WebSocketApp(
-        WEBSOCKET_URL,
-        on_open=on_open,
-        on_message=on_message
-    )
-    ws.run_forever()
 
-# === INICIAR ===
-def main():
-    print("Bot iniciado...")
-    websocket.enableTrace(False)
-    t = Thread(target=iniciar_websocket)
-    t.start()
-
+# === LOOP PRINCIPAL ===
 if __name__ == "__main__":
-    main()
+    while True:
+        try:
+            websocket.enableTrace(False)
+            ws = websocket.WebSocketApp(
+                URL_WS,
+                on_message=on_message,
+                on_error=on_error,
+                on_close=on_close
+            )
+            ws.on_open = on_open
+            ws.run_forever()
+        except Exception as e:
+            print(f"Erro geral: {e}")
+            time.sleep(5)  # Espera antes de tentar reconectar
